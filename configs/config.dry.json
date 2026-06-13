@@ -17,9 +17,11 @@
     "order_types": {
         "entry": "limit",
         "exit": "limit",
-        "stoploss": "market",
-        "stoploss_on_exchange": false
+        "emergencyexit": "market",
+        "forceexit": "market",
+        "stoploss": "market"
     },
+    "stoploss_on_exchange": false,
     "bot_name": "HotHunter_Dry",
     "position_adjustment_enable": true,
     "max_entry_position_adjustment": 2,
