@@ -29,8 +29,8 @@ class HotHunterStrategy(IStrategy):
     # --- 止损 ---
     stoploss = -0.08
     trailing_stop = True
-    trailing_stop_positive = 0.03
-    trailing_stop_positive_offset = 0.01
+    trailing_stop_positive = 0.02
+    trailing_stop_positive_offset = 0.04
     trailing_only_offset_is_reached = True
 
     # --- 原生熔断保护（字典格式，无需 import） ---
