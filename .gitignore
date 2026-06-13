@@ -1,0 +1,35 @@
+# 环境变量（包含 API Key / Secret，禁止提交）
+.env
+
+# 运行时数据
+data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# 回测结果
+backtest_results/
+*.html
+*.csv
+
+# 日志
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 系统
+Thumbs.db
+.DS_Store

@@ -1,0 +1,3 @@
+# HotHunter 依赖
+# Freqtrade 会自动安装大部分依赖，此文件用于额外需求
+freqtrade>=2026.5.1
