@@ -58,38 +58,5 @@
         "listen_port": 8080,
         "username": "",
         "password": ""
-    },
-    "protections": [
-        {
-            "method": "StoplossGuard",
-            "lookback_period_candles": 20,
-            "trade_limit": 3,
-            "stop_duration_candles": 24,
-            "only_per_pair": false
-        },
-        {
-            "method": "StoplossGuard",
-            "lookback_period_candles": 48,
-            "trade_limit": 5,
-            "stop_duration_candles": 144,
-            "only_per_pair": false
-        },
-        {
-            "method": "MaxDrawdown",
-            "lookback_period_candles": 99999,
-            "max_allowed_drawdown": 0.25,
-            "stop_duration_candles": 99999
-        },
-        {
-            "method": "MaxDrawdown",
-            "lookback_period_candles": 99999,
-            "max_allowed_drawdown": 0.40,
-            "stop_duration_candles": 99999
-        },
-        {
-            "method": "CooldownPeriod",
-            "stop_duration_candles": 6,
-            "only_per_pair": true
-        }
-    ]
+    }
 }

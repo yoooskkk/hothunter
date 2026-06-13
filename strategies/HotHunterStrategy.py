@@ -8,10 +8,15 @@ Freqtrade 2026.5.1 原生 API，无需额外依赖
   3. 五层插针防护(HLC3+影线罚分+K线实体+多TF确认+入场冷却)
   4. 分批止盈(8/15/25%) + 金字塔加仓 via adjust_trade_position
   5. 利润阶梯锁定 + 里程碑提取 via custom_stake_amount
-  6. 风控由 Freqtrade 原生 Protections 接管
+  6. 风控由 Freqtrade 原生 Protections 接管（策略内声明）
 """
 
 from freqtrade.strategy import IStrategy, IntParameter, DecimalParameter, CategoricalParameter
+from freqtrade.strategy.protections import (
+    StoplossGuard,
+    MaxDrawdown,
+    CooldownPeriod,
+)
 from pandas import DataFrame
 import talib.abstract as ta
 import freqtrade.vendor.qtpylib.indicators as qtpylib
@@ -33,12 +38,25 @@ class HotHunterStrategy(IStrategy):
     trailing_stop_positive_offset = 0.01
     trailing_only_offset_is_reached = True
 
+    # --- 原生熔断保护（新版本在策略内声明） ---
+    protections = [
+        StoplossGuard(lookback_period_candles=20, trade_limit=3,
+                      stop_duration_candles=24, only_per_pair=False),
+        StoplossGuard(lookback_period_candles=48, trade_limit=5,
+                      stop_duration_candles=144, only_per_pair=False),
+        MaxDrawdown(lookback_period_candles=99999, max_allowed_drawdown=0.25,
+                    stop_duration_candles=99999),
+        MaxDrawdown(lookback_period_candles=99999, max_allowed_drawdown=0.40,
+                    stop_duration_candles=99999),
+        CooldownPeriod(stop_duration_candles=6, only_per_pair=True),
+    ]
+
     # --- 订单 ---
     use_exit_signal = True
     exit_profit_only = False
     ignore_roi_if_entry_signal = False
     process_only_new_candles = True
-    startup_candle_count = 60
+    startup_candle_count = 100
 
     # --- 时间框架 ---
     def informative_pairs(self):

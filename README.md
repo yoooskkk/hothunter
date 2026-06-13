@@ -134,15 +134,26 @@ HotHunter/
 
 ## 风控体系
 
-系统不依赖自定义风控代码，而是使用 Freqtrade 原生 Protections：
+系统不依赖自定义风控代码，而是在 [`strategies/HotHunterStrategy.py`](strategies/HotHunterStrategy.py) 中声明 Freqtrade 原生 Protections（2026.5.1 版本策略内声明，不再写在 JSON 配置文件中）：
 
-| Protection | 作用 | 参数 |
-|------------|------|------|
+| Protection | 作用 | 代码参数 |
+|------------|------|----------|
 | StoplossGuard | 连续3笔止损→停2h | lookback=20, limit=3, duration=24 |
 | StoplossGuard | 连续5笔止损→停12h | lookback=48, limit=5, duration=144 |
 | MaxDrawdown | 总回撤>25%→暂停 | max_allowed=0.25 |
 | MaxDrawdown | 总回撤>40%→紧急停止 | max_allowed=0.40 |
 | CooldownPeriod | 交易对冷却30min | duration=6 candles |
+
+```python
+# 策略文件中的声明方式（Freqtrade 2026.5.1）
+protections = [
+    StoplossGuard(lookback_period_candles=20, trade_limit=3,
+                  stop_duration_candles=24, only_per_pair=False),
+    MaxDrawdown(lookback_period_candles=99999, max_allowed_drawdown=0.25,
+                stop_duration_candles=99999),
+    CooldownPeriod(stop_duration_candles=6, only_per_pair=True),
+]
+```
 
 ## 利润锁定机制
 
