@@ -46,19 +46,18 @@
             "refresh_period": 86400
         }
     ],
-    "pair_whitelist": [
-        "BTC/USDT",
-        "ETH/USDT",
-        "BNB/USDT",
-        "SOL/USDT",
-        "DOGE/USDT"
-    ],
     "exchange": {
         "name": "binance",
         "key": "${HOTHUNTER_EXCHANGE_KEY}",
         "secret": "${HOTHUNTER_EXCHANGE_SECRET}",
         "ccxt_config": {"enableRateLimit": true},
-        "pair_whitelist": [],
+        "pair_whitelist": [
+            "BTC/USDT",
+            "ETH/USDT",
+            "BNB/USDT",
+            "SOL/USDT",
+            "DOGE/USDT"
+        ],
         "pair_blacklist": []
     },
     "telegram": {
