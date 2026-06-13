@@ -25,13 +25,6 @@
         "order_book_top": 1,
         "price_last_balance": 0.0
     },
-    "order_types": {
-        "entry": "limit",
-        "exit": "limit",
-        "emergencyexit": "market",
-        "forceexit": "market",
-        "stoploss": "market"
-    },
     "stoploss_on_exchange": false,
     "bot_name": "HotHunter_Live",
     "position_adjustment_enable": true,
