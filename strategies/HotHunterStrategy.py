@@ -74,6 +74,13 @@ class HotHunterStrategy(IStrategy):
     ignore_roi_if_entry_signal = False
     process_only_new_candles = True
     startup_candle_count = 100
+    order_types = {
+        "entry": "limit",
+        "exit": "limit",
+        "emergencyexit": "market",
+        "forceexit": "market",
+        "stoploss": "market",
+    }
 
     # --- 时间框架 ---
     def informative_pairs(self):
