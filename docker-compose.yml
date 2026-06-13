@@ -11,7 +11,7 @@ services:
       - ./data:/freqtrade/user_data/data
       - ./scripts:/freqtrade/user_data/scripts:ro
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8888:8080"
     environment:
       - TZ=Asia/Tokyo
       - HOTHUNTER_EXCHANGE_KEY=${HOTHUNTER_EXCHECK_KEY:-}
