@@ -77,9 +77,10 @@ class HotHunterStrategy(IStrategy):
     order_types = {
         "entry": "limit",
         "exit": "limit",
-        "emergencyexit": "market",
-        "forceexit": "market",
+        "emergency_exit": "market",
+        "force_exit": "market",
         "stoploss": "market",
+        "stoploss_on_exchange": False,
     }
 
     # --- 时间框架 ---
