@@ -30,11 +30,8 @@ class HotHunterStrategy(IStrategy):
 
     # --- 止损 ---
     stoploss = -0.08
-    trailing_stop = True
-    trailing_stop_positive = 0.05
-    trailing_stop_positive_offset = 0.08
-    trailing_only_offset_is_reached = True
-    use_custom_stoploss = True  # 启用 custom_stoploss，修复Bug#3
+    trailing_stop = False  # 关闭原生 trailing，改用 custom_stoploss 阶梯保护
+    use_custom_stoploss = True
 
     # --- 原生熔断保护（字典格式，无需 import） ---
     protections = [
@@ -90,6 +87,7 @@ class HotHunterStrategy(IStrategy):
     def informative_pairs(self):
         pairs = self.dp.current_whitelist()
         informative_pairs = [(pair, "15m") for pair in pairs]
+        informative_pairs.append(("BTC/USDT", "1h"))  # 大盘过滤
         return informative_pairs
 
     # ================================================================
@@ -200,6 +198,15 @@ class HotHunterStrategy(IStrategy):
         # --- RSI (供入场条件使用) ---
         df["rsi"] = ta.RSI(df, timeperiod=14)
 
+        # --- BTC 1h 大盘过滤 (收盘价 > EMA20 才允许入场) ---
+        btc_1h = self.dp.get_pair_dataframe("BTC/USDT", "1h")
+        if btc_1h is not None and not btc_1h.empty:
+            btc_close = btc_1h["close"]
+            btc_ema20 = ta.EMA(btc_close, timeperiod=20)
+            df["btc_trend_up"] = btc_close.iloc[-1] > btc_ema20.iloc[-1]
+        else:
+            df["btc_trend_up"] = True  # 无数据时默认放行
+
         return df
 
     # ================================================================
@@ -235,7 +242,10 @@ class HotHunterStrategy(IStrategy):
         conditions.append(dataframe["rsi"] > 50)
         conditions.append(dataframe["rsi"] < 75)
 
-        # 条件6: K线实体确认
+        # 条件6: BTC 1h 大盘多头排列（BTC 收盘价 > EMA20）
+        conditions.append(dataframe["btc_trend_up"] == True)
+
+        # 条件7: K线实体确认
         conditions.append(dataframe["body_confirm"] > 0)
 
         # 条件7: 价格在 EMA21 上方
@@ -253,19 +263,20 @@ class HotHunterStrategy(IStrategy):
     # ================================================================
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """
-        热点消退离场 — 任一派满足即退出（| 或逻辑）
-        1. 成交量持续萎缩 < SMA20 x 0.7
-        2. RSI < 35（超卖，比原来40更低更晚触发）
-        3. HLC3 下穿 EMA21（中期趋势破位）
+        热点消退离场 — 仅基于15m趋势破位
+        
+        5m 的 vol/rsi 波动太快，不作为独立退出理由。
+        只有15m周期的 EMA9/EMA21 死叉才表示趋势真正转弱。
         """
-        # 使用 or_ 连接，任一条件满足即退出
-        exit_signal = (
-            (dataframe["vol_ratio"] < 0.7)
-            | (dataframe["rsi"] < 35)
-            | qtpylib.crossed_below(dataframe["hlc3"], dataframe["ema_21"])
-        )
-        exit_signal &= dataframe["volume"] > 0
+        # 15m EMA 死叉（使用 merge_informative_pair 合并后的列）
+        if "ema_9_15m" in dataframe.columns and "ema_21_15m" in dataframe.columns:
+            exit_signal = qtpylib.crossed_below(
+                dataframe["ema_9_15m"], dataframe["ema_21_15m"]
+            )
+        else:
+            exit_signal = False
 
+        exit_signal &= dataframe["volume"] > 0
         dataframe.loc[exit_signal, "exit_long"] = 1
         return dataframe
 
@@ -385,17 +396,43 @@ class HotHunterStrategy(IStrategy):
         return None
 
     # ================================================================
-    # custom_stoploss - 动态止损（修复Bug#3：加仓后收紧止损）
+    # custom_stoploss - 阶梯激活保护（替代原生 Trailing Stop）
     # ================================================================
     def custom_stoploss(
         self, pair: str, trade, current_time: datetime,
         current_rate: float, current_profit: float, **kwargs
     ) -> float:
         """
-        动态止损：
-        - 首次入场: -8%（硬止损）
-        - 金字塔加仓后: -5%（均价抬高后收紧止损，防止利润回吐）
+        基于峰值利润的阶梯保护：
+        
+        当前利润 < 0%:   硬止损 -8%（或加仓后的 -5%）
+        0% ≤ 利润 < 3%: 允许回撤到 -2%（微利保护）
+        3% ≤ 利润 < 5%: 保本线（利润跌回 0% 就跑）
+        利润 ≥ 5%:      允许回撤 5%（跟踪最高利润的 -5%）
         """
+        if current_profit is None:
+            return -0.08
+
+        # 追踪峰值利润（用字典记录每笔交易的最高利润）
+        trade_id = trade.id
+        if not hasattr(self, "_peak_profit"):
+            self._peak_profit = {}
+        peak = self._peak_profit.get(trade_id, current_profit)
+        if current_profit > peak:
+            self._peak_profit[trade_id] = current_profit
+            peak = current_profit
+
+        # 阶梯保护
+        if peak >= 0.05:
+            # 利润 > 5%: 跟踪锁定，允许从峰值回撤 5%
+            return peak - 0.05 - current_profit
+        if peak >= 0.03:
+            # 利润 3-5%: 保护到保本线
+            return -0.01
+        if peak >= 0.0:
+            # 有盈利但不到3%: 保护微利，允许小回撤
+            return -0.02
+        # 亏损中: 硬止损
         if trade.nr_of_successful_entries > 1:
             return -0.05
         return -0.08
