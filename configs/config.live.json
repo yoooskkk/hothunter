@@ -62,9 +62,9 @@
         "pair_blacklist": []
     },
     "telegram": {
-        "enabled": true,
-        "token": "${HOTHUNTER_TELEGRAM_TOKEN}",
-        "chat_id": "${HOTHUNTER_TELEGRAM_CHAT_ID}"
+        "enabled": false,
+        "token": "YOUR_TELEGRAM_BOT_TOKEN",
+        "chat_id": "YOUR_TELEGRAM_CHAT_ID"
     },
     "api_server": {
         "enabled": false,

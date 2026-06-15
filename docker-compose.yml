@@ -14,10 +14,6 @@ services:
       - "127.0.0.1:8888:8080"
     environment:
       - TZ=Asia/Tokyo
-      - HOTHUNTER_EXCHANGE_KEY=${HOTHUNTER_EXCHECK_KEY:-}
-      - HOTHUNTER_EXCHANGE_SECRET=${HOTHUNTER_EXCHANGE_SECRET:-}
-      - HOTHUNTER_TELEGRAM_TOKEN=${HOTHUNTER_TELEGRAM_TOKEN:-}
-      - HOTHUNTER_TELEGRAM_CHAT_ID=${HOTHUNTER_TELEGRAM_CHAT_ID:-}
     env_file:
       - .env
     command: >

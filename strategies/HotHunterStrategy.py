@@ -166,8 +166,8 @@ class HotHunterStrategy(IStrategy):
             ema9_15m = ta.EMA(hlc3_15m, timeperiod=9)
             ema21_15m = ta.EMA(hlc3_15m, timeperiod=21)
             adx_15m = ta.ADX(pairs_15m, timeperiod=14)
-            mtf_trend = (ema9_15m.iloc[-1] > ema21_15m.iloc[-1]) if len(ema9_15m) > 0 else False
-            mtf_adx = adx_15m.iloc[-1] > 20 if len(adx_15m) > 0 else False
+            mtf_trend = (ema9_15m[-1] > ema21_15m[-1]) if len(ema9_15m) > 0 else False
+            mtf_adx = (adx_15m[-1] > 20) if len(adx_15m) > 0 else False
             df["mtf_score"] = (int(mtf_trend) * 5 + int(mtf_adx) * 5)
         else:
             df["mtf_score"] = 0.0
@@ -435,9 +435,9 @@ class HotHunterStrategy(IStrategy):
         if pairs_15m is None or pairs_15m.empty:
             return None
         hlc3_15m = (pairs_15m["high"] + pairs_15m["low"] + pairs_15m["close"]) / 3
-        ema9_15m = ta.EMA(hlc3_15m, timeperiod=9).iloc[-1]
-        ema21_15m = ta.EMA(hlc3_15m, timeperiod=21).iloc[-1]
-        adx_15m = ta.ADX(pairs_15m, timeperiod=14).iloc[-1]
+        ema9_15m = ta.EMA(hlc3_15m, timeperiod=9)[-1]
+        ema21_15m = ta.EMA(hlc3_15m, timeperiod=21)[-1]
+        adx_15m = ta.ADX(pairs_15m, timeperiod=14)[-1]
         vol_15m = pairs_15m["volume"].iloc[-1]
         vol_ma20_15m = pairs_15m["volume"].rolling(20).mean().iloc[-1]
 
