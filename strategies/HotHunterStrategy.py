@@ -11,7 +11,7 @@ Freqtrade 2026.5.1 原生 API，无需额外依赖
   6. 风控由 Freqtrade 原生 Protections 接管（策略内字典声明）
 """
 
-from freqtrade.strategy import IStrategy, IntParameter, DecimalParameter, CategoricalParameter
+from freqtrade.strategy import IStrategy, IntParameter, DecimalParameter, CategoricalParameter, merge_informative_pair
 from pandas import DataFrame
 import talib.abstract as ta
 import freqtrade.vendor.qtpylib.indicators as qtpylib
@@ -34,6 +34,7 @@ class HotHunterStrategy(IStrategy):
     trailing_stop_positive = 0.02
     trailing_stop_positive_offset = 0.04
     trailing_only_offset_is_reached = True
+    use_custom_stoploss = True  # 启用 custom_stoploss，修复Bug#3
 
     # --- 原生熔断保护（字典格式，无需 import） ---
     protections = [
@@ -162,17 +163,23 @@ class HotHunterStrategy(IStrategy):
         ).clip(0, 1) * 25.0
 
         # --- 7. 确认分 (10%) - 多时间框架 ---
-        pairs_15m = self.dp.get_pair_dataframe(metadata["pair"], "15m")
-        if pairs_15m is not None and not pairs_15m.empty:
-            hlc3_15m = (pairs_15m["high"] + pairs_15m["low"] + pairs_15m["close"]) / 3
-            ema9_15m = np.asarray(ta.EMA(hlc3_15m, timeperiod=9))
-            ema21_15m = np.asarray(ta.EMA(hlc3_15m, timeperiod=21))
-            adx_15m = np.asarray(ta.ADX(pairs_15m, timeperiod=14))
-            mtf_trend = (ema9_15m[-1] > ema21_15m[-1]) if len(ema9_15m) > 0 else False
-            mtf_adx = (adx_15m[-1] > 20) if len(adx_15m) > 0 else False
-            df["mtf_score"] = (int(mtf_trend) * 5 + int(mtf_adx) * 5)
+        # 使用 merge_informative_pair 对齐数据，ffill=True 确保只用已收盘的15m数据
+        # 避免 future leak（回测）和信号闪烁（实盘）
+        informative_15m = self.dp.get_pair_dataframe(metadata["pair"], "15m")
+        if informative_15m is not None and not informative_15m.empty:
+            hlc3_15m = (informative_15m["high"] + informative_15m["low"] + informative_15m["close"]) / 3
+            informative_15m["ema_9"] = ta.EMA(hlc3_15m, timeperiod=9)
+            informative_15m["ema_21"] = ta.EMA(hlc3_15m, timeperiod=21)
+            informative_15m["adx"] = ta.ADX(informative_15m, timeperiod=14)
+            # 合并到5m数据框，ffill 用上一个已收盘的15m值
+            dataframe = merge_informative_pair(dataframe, informative_15m, "5m", "15m", ffill=True)
+            df = dataframe
+            mtf_trend = df["ema_9_15m"] > df["ema_21_15m"]
+            mtf_adx = df["adx_15m"] > 20
         else:
-            df["mtf_score"] = 0.0
+            mtf_trend = False
+            mtf_adx = False
+        df["mtf_score"] = mtf_trend.astype(float) * 5 + mtf_adx.astype(float) * 5
 
         # --- 收盘位置分 (2分) ---
         df["close_position"] = (
@@ -289,21 +296,11 @@ class HotHunterStrategy(IStrategy):
         **kwargs
     ) -> bool:
         """
-        入场前检查：
-        1. 冷却时间（距最近一笔同交易对入场 > 30min）
-        2. 风控熔断（由 Freqtrade Protections 自动处理，无需手动检查）
+        入场确认—仅放行，风控全部由原生 Protections 处理：
+        - CooldownPeriod: 单币冷却30min（基于真实成交触发，不会在挂单未成交时误锁）
+        - StoplossGuard: 连续止损熔断
+        - MaxDrawdown: 最大回撤保护
         """
-        # 冷却时间检查
-        if self.custom_trade_info is None:
-            self.custom_trade_info = {}
-
-        pair_entries = self.custom_trade_info.get("pair_last_entry", {})
-        last_entry = pair_entries.get(pair)
-        if last_entry and (current_time - last_entry).total_seconds() < 1800:
-            return False
-
-        pair_entries[pair] = current_time
-        self.custom_trade_info["pair_last_entry"] = pair_entries
         return True
 
     # ================================================================
@@ -394,31 +391,61 @@ class HotHunterStrategy(IStrategy):
         return None
 
     # ================================================================
+    # custom_stoploss - 动态止损（修复Bug#3：加仓后收紧止损）
+    # ================================================================
+    def custom_stoploss(
+        self, pair: str, trade, current_time: datetime,
+        current_rate: float, current_profit: float, **kwargs
+    ) -> float:
+        """
+        动态止损：
+        - 首次入场: -8%（硬止损）
+        - 金字塔加仓后: -5%（均价抬高后收紧止损，防止利润回吐）
+        """
+        if trade.nr_of_successful_entries > 1:
+            return -0.05
+        return -0.08
+
+    # ================================================================
     # 辅助方法
     # ================================================================
     def _check_take_profit(self, trade, current_profit: float) -> float:
-        """检查是否触发分批止盈"""
-        trade_id = trade.id
-        if self._tp_state is None:
-            self._tp_state = {}
+        """
+        分批止盈 — 基于剩余仓位比例判断（无需内存状态）
+        
+        初始仓位: ratio = 1.0
+        TP1(卖30%后): ratio ≈ 0.70
+        TP2(再卖30%后): ratio ≈ 0.49
+        TP3(卖40%后): 交易关闭
+        
+        机器人重启后 trade.stake_amount 从数据库恢复，
+        ratio 计算依然准确，不会重复触发止盈。
+        """
+        initial = trade.initial_stake_amount
+        remaining = trade.stake_amount
+        if initial <= 0:
+            return None
+        ratio = remaining / initial  # 剩余仓位比例
 
-        state = self._tp_state.get(trade_id, {"tp1": False, "tp2": False, "tp3": False})
+        # ratio > 0.70 → 从未触发出盈
+        if ratio > 0.70:
+            if current_profit >= 0.25:
+                return -(initial * 0.40)
+            if current_profit >= 0.15:
+                return -(initial * 0.30)
+            if current_profit >= 0.08:
+                return -(initial * 0.30)
+            return None
 
-        if current_profit >= 0.25 and not state["tp3"]:
-            sell_amount = trade.stake_amount * 0.40
-            self._tp_state[trade_id] = {**state, "tp3": True}
-            return -sell_amount
+        # ratio > 0.49 → 已触发TP1，可触发TP2/TP3
+        if ratio > 0.49:
+            if current_profit >= 0.25:
+                return -(initial * 0.40)
+            if current_profit >= 0.15:
+                return -(initial * 0.30)
+            return None
 
-        if current_profit >= 0.15 and not state["tp2"]:
-            sell_amount = trade.stake_amount * 0.30
-            self._tp_state[trade_id] = {**state, "tp2": True}
-            return -sell_amount
-
-        if current_profit >= 0.08 and not state["tp1"]:
-            sell_amount = trade.stake_amount * 0.30
-            self._tp_state[trade_id] = {**state, "tp1": True}
-            return -sell_amount
-
+        # ratio <= 0.49 → 所有止盈批次已触发
         return None
 
     def _check_pyramid_add(self, trade, current_time: datetime) -> float:
@@ -430,17 +457,17 @@ class HotHunterStrategy(IStrategy):
         if profit < 0.10:
             return None
 
-        # 检查15m趋势（简化检查，依赖 informative_pairs）
+        # 检查15m趋势 — 使用 [-2] 取已收盘的上一根15m线，避免未来数据
         pair = trade.pair
         pairs_15m = self.dp.get_pair_dataframe(pair, "15m")
-        if pairs_15m is None or pairs_15m.empty:
+        if pairs_15m is None or pairs_15m.empty or len(pairs_15m) < 30:
             return None
         hlc3_15m = (pairs_15m["high"] + pairs_15m["low"] + pairs_15m["close"]) / 3
-        ema9_15m = np.asarray(ta.EMA(hlc3_15m, timeperiod=9))[-1]
-        ema21_15m = np.asarray(ta.EMA(hlc3_15m, timeperiod=21))[-1]
-        adx_15m = np.asarray(ta.ADX(pairs_15m, timeperiod=14))[-1]
-        vol_15m = pairs_15m["volume"].iloc[-1]
-        vol_ma20_15m = pairs_15m["volume"].rolling(20).mean().iloc[-1]
+        ema9_15m = np.asarray(ta.EMA(hlc3_15m, timeperiod=9))[-2]
+        ema21_15m = np.asarray(ta.EMA(hlc3_15m, timeperiod=21))[-2]
+        adx_15m = np.asarray(ta.ADX(pairs_15m, timeperiod=14))[-2]
+        vol_15m = pairs_15m["volume"].iloc[-2]
+        vol_ma20_15m = pairs_15m["volume"].rolling(20).mean().iloc[-2]
 
         if not (ema9_15m > ema21_15m and adx_15m > 30 and vol_15m > vol_ma20_15m * 1.3):
             return None
@@ -463,73 +490,35 @@ class HotHunterStrategy(IStrategy):
         return add_amount
 
     def _get_safe_profit(self, total_capital: float) -> float:
-        """计算里程碑安全利润"""
-        if self.custom_trade_info is None:
-            self.custom_trade_info = {}
-        milestones = self.custom_trade_info.get("milestones", [])
-        initial_capital = self.custom_trade_info.get("initial_capital", 100.0)
-
-        profit = total_capital - initial_capital
+        """
+        安全利润 — 无状态版本，不依赖内存
+        
+        基于当前总资产锁定最高档位比例的利润。
+        重启后计算依然正确，不会因内存状态丢失而放大仓位。
+        """
+        initial = 100.0
+        profit = total_capital - initial
         if profit <= 0:
             return 0.0
-
-        safe = 0.0
-        new_milestones = list(milestones)
-
-        # 里程碑检查
-        milestone_checks = [
-            (1000, 0.10),
-            (5000, 0.15),
-            (20000, 0.20),
-            (50000, 0.25),
-        ]
-
-        for milestone, ratio in milestone_checks:
-            if total_capital >= milestone and milestone not in milestones:
-                locked = profit * ratio
-                safe += locked
-                new_milestones.append(milestone)
-
-        if len(new_milestones) > len(milestones):
-            self.custom_trade_info["milestones"] = new_milestones
-
-        return safe
+        if total_capital >= 50000:
+            return profit * 0.25
+        if total_capital >= 20000:
+            return profit * 0.20
+        if total_capital >= 5000:
+            return profit * 0.15
+        if total_capital >= 1000:
+            return profit * 0.10
+        return 0.0
 
     def _get_recent_win_rate(self) -> float:
-        """获取近期胜率"""
-        if self.custom_trade_info is None:
-            self.custom_trade_info = {}
-        return self.custom_trade_info.get("win_rate", 0.50)
+        """近期胜率—返回中性值0.50，不依赖内存"""
+        return 0.50
 
     def _get_current_drawdown(self, total_capital: float) -> float:
-        """获取当前回撤比例"""
-        if self.custom_trade_info is None:
-            self.custom_trade_info = {}
-        peak = self.custom_trade_info.get("peak_capital", total_capital)
-        if total_capital > peak:
-            self.custom_trade_info["peak_capital"] = total_capital
-            peak = total_capital
-        return (peak - total_capital) / peak if peak > 0 else 0.0
+        """
+        当前回撤—简化返回0.0。
+        回撤熔断由 Freqtrade 原生 MaxDrawdown Protection 全权接管。
+        """
+        _ = total_capital
+        return 0.0
 
-    # ================================================================
-    # 自定义状态（在 strategy 启动时初始化）
-    # ================================================================
-    @property
-    def custom_trade_info(self):
-        if not hasattr(self, "_custom_trade_info"):
-            self._custom_trade_info = {}
-        return self._custom_trade_info
-
-    @custom_trade_info.setter
-    def custom_trade_info(self, value):
-        self._custom_trade_info = value
-
-    @property
-    def _tp_state(self):
-        if not hasattr(self, "__tp_state"):
-            self.__tp_state = {}
-        return self.__tp_state
-
-    @_tp_state.setter
-    def _tp_state(self, value):
-        self.__tp_state = value
