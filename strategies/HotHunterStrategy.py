@@ -384,7 +384,7 @@ class HotHunterStrategy(IStrategy):
             return result
 
         # --- 金字塔加仓（返回正值 = 买入追加）---
-        result = self._check_pyramid_add(trade, current_time)
+        result = self._check_pyramid_add(trade, current_time, current_profit)
         if result is not None:
             return result
 
@@ -444,12 +444,12 @@ class HotHunterStrategy(IStrategy):
 
         return None
 
-    def _check_pyramid_add(self, trade, current_time: datetime) -> float:
+    def _check_pyramid_add(self, trade, current_time: datetime, current_profit: float) -> float:
         """检查是否触发金字塔加仓"""
         if trade.nr_of_successful_entries >= 1 + self.max_entry_position_adjustment:
             return None
 
-        profit = trade.calc_profit_ratio(current_time)
+        profit = current_profit
         if profit < 0.10:
             return None
 
