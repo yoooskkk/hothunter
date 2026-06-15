@@ -411,23 +411,21 @@ class HotHunterStrategy(IStrategy):
     # ================================================================
     def _check_take_profit(self, trade, current_profit: float) -> float:
         """
-        分批止盈 — 基于剩余仓位比例判断（无需内存状态）
+        分批止盈 — 兼容 LiveTrade(实盘) 和 LocalTrade(回测)
         
-        初始仓位: ratio = 1.0
-        TP1(卖30%后): ratio ≈ 0.70
-        TP2(再卖30%后): ratio ≈ 0.49
-        TP3(卖40%后): 交易关闭
-        
-        机器人重启后 trade.stake_amount 从数据库恢复，
-        ratio 计算依然准确，不会重复触发止盈。
+        LiveTrade: initial_stake_amount 可用，精确计算比例
+        LocalTrade(回测): 无 initial_stake_amount，fallback 到 max_stake_amount
         """
-        initial = trade.initial_stake_amount
         remaining = trade.stake_amount
-        if initial <= 0:
+        if remaining <= 0:
             return None
-        ratio = remaining / initial  # 剩余仓位比例
 
-        # ratio > 0.70 → 从未触发出盈
+        initial = getattr(trade, 'initial_stake_amount', None)
+        if initial is None or initial <= 0:
+            initial = getattr(trade, 'max_stake_amount', remaining)
+
+        ratio = remaining / initial
+
         if ratio > 0.70:
             if current_profit >= 0.25:
                 return -(initial * 0.40)
@@ -437,7 +435,6 @@ class HotHunterStrategy(IStrategy):
                 return -(initial * 0.30)
             return None
 
-        # ratio > 0.49 → 已触发TP1，可触发TP2/TP3
         if ratio > 0.49:
             if current_profit >= 0.25:
                 return -(initial * 0.40)
@@ -445,7 +442,6 @@ class HotHunterStrategy(IStrategy):
                 return -(initial * 0.30)
             return None
 
-        # ratio <= 0.49 → 所有止盈批次已触发
         return None
 
     def _check_pyramid_add(self, trade, current_time: datetime) -> float:
