@@ -10,6 +10,7 @@
     "use_exit_signal": true,
     "exit_profit_only": false,
     "ignore_roi_if_entry_signal": false,
+    "initial_state": "running",
     "startup_candle_count": 100,
     "cancel_open_orders_on_exit": true,
     "unfilledtimeout": {"entry": 60, "exit": 60},
