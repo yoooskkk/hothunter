@@ -17,7 +17,7 @@ import talib.abstract as ta
 import freqtrade.vendor.qtpylib.indicators as qtpylib
 from datetime import datetime, timedelta
 from functools import reduce
-from operator import and_
+from operator import and_, or_
 import numpy as np
 
 
@@ -31,8 +31,8 @@ class HotHunterStrategy(IStrategy):
     # --- 止损 ---
     stoploss = -0.08
     trailing_stop = True
-    trailing_stop_positive = 0.02
-    trailing_stop_positive_offset = 0.04
+    trailing_stop_positive = 0.05
+    trailing_stop_positive_offset = 0.08
     trailing_only_offset_is_reached = True
     use_custom_stoploss = True  # 启用 custom_stoploss，修复Bug#3
 
@@ -217,8 +217,8 @@ class HotHunterStrategy(IStrategy):
         """
         conditions = []
 
-        # 条件1: 热点评分
-        conditions.append(dataframe["hot_score"] >= 65)
+        # 条件1: 热点评分（熊市中提高门槛，减少追高）
+        conditions.append(dataframe["hot_score"] >= 70)
 
         # 条件2: 插针罚分不过限
         conditions.append(dataframe["wick_penalty"] >= -25)
@@ -253,26 +253,20 @@ class HotHunterStrategy(IStrategy):
     # ================================================================
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """
-        热点消退离场：
+        热点消退离场 — 任一派满足即退出（| 或逻辑）
         1. 成交量持续萎缩 < SMA20 x 0.7
-        2. RSI < 40（趋势转弱）
+        2. RSI < 35（超卖，比原来40更低更晚触发）
         3. HLC3 下穿 EMA21（中期趋势破位）
         """
-        exit_conditions = []
-
-        # 缩量
-        exit_conditions.append(dataframe["vol_ratio"] < 0.7)
-        # RSI 转弱
-        exit_conditions.append(dataframe["rsi"] < 40)
-        # 趋势破位：HLC3 下穿 EMA21
-        exit_conditions.append(
-            qtpylib.crossed_below(dataframe["hlc3"], dataframe["ema_21"])
+        # 使用 or_ 连接，任一条件满足即退出
+        exit_signal = (
+            (dataframe["vol_ratio"] < 0.7)
+            | (dataframe["rsi"] < 35)
+            | qtpylib.crossed_below(dataframe["hlc3"], dataframe["ema_21"])
         )
+        exit_signal &= dataframe["volume"] > 0
 
-        exit_conditions.append(dataframe["volume"] > 0)
-        exit_signals = reduce(and_, exit_conditions)
-        dataframe.loc[exit_signals, "exit_long"] = 1
-
+        dataframe.loc[exit_signal, "exit_long"] = 1
         return dataframe
 
     # ================================================================
