@@ -16,6 +16,8 @@ from pandas import DataFrame
 import talib.abstract as ta
 import freqtrade.vendor.qtpylib.indicators as qtpylib
 from datetime import datetime, timedelta
+from functools import reduce
+from operator import and_
 import numpy as np
 
 
@@ -231,11 +233,11 @@ class HotHunterStrategy(IStrategy):
 
         # 条件7: 价格在 EMA21 上方
         conditions.append(dataframe["hlc3"] > dataframe["ema_21"])
+        # 条件8: 成交量大于0
+        conditions.append(dataframe["volume"] > 0)
 
-        dataframe.loc[
-            conditions & (dataframe["volume"] > 0),
-            "enter_long",
-        ] = 1
+        enter_signals = reduce(and_, conditions)
+        dataframe.loc[enter_signals, "enter_long"] = 1
 
         return dataframe
 
@@ -260,10 +262,9 @@ class HotHunterStrategy(IStrategy):
             qtpylib.crossed_below(dataframe["hlc3"], dataframe["ema_21"])
         )
 
-        dataframe.loc[
-            exit_conditions & (dataframe["volume"] > 0),
-            "exit_long",
-        ] = 1
+        exit_conditions.append(dataframe["volume"] > 0)
+        exit_signals = reduce(and_, exit_conditions)
+        dataframe.loc[exit_signals, "exit_long"] = 1
 
         return dataframe
 
