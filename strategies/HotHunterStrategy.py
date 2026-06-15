@@ -474,12 +474,15 @@ class HotHunterStrategy(IStrategy):
         if total_stake >= cap:
             return None
 
-        # 加仓比例递减
+        # 加仓比例递减（兼容 LocalTrade 无 initial_stake_amount）
         entry_count = trade.nr_of_successful_entries
+        initial = getattr(trade, 'initial_stake_amount', None)
+        if initial is None or initial <= 0:
+            initial = getattr(trade, 'max_stake_amount', trade.stake_amount)
         if entry_count == 1:
-            add_amount = trade.initial_stake_amount * 0.50
+            add_amount = initial * 0.50
         elif entry_count == 2:
-            add_amount = trade.initial_stake_amount * 0.25
+            add_amount = initial * 0.25
         else:
             return None
 
