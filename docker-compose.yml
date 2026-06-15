@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   freqtrade:
     image: freqtradeorg/freqtrade:2026.5.1
