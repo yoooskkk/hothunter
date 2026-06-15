@@ -468,8 +468,8 @@ class HotHunterStrategy(IStrategy):
         if not (ema9_15m > ema21_15m and adx_15m > 30 and vol_15m > vol_ma20_15m * 1.3):
             return None
 
-        # 总仓位上限检查
-        total_stake = trade.stake_amount + trade.additional_stake_amount
+        # 总仓位上限检查（兼容 LocalTrade 无 additional_stake_amount）
+        total_stake = trade.stake_amount + getattr(trade, 'additional_stake_amount', 0.0)
         cap = self.wallets.get_total_stake_amount() * 0.20
         if total_stake >= cap:
             return None
